@@ -3,10 +3,10 @@
 {% block content %}
 <style>
     .home-card {
-        margin-bottom: 28px;
-        padding: 24px 28px 30px;
+        margin-bottom: 16px;
+        padding: 18px 14px 20px;
         border: 1px solid #edf1f6;
-        border-radius: 16px;
+        border-radius: 12px;
         background: var(--panel);
         box-shadow: 0 8px 24px rgba(38, 72, 117, .08);
     }
@@ -15,25 +15,74 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        margin: 0 0 18px;
+        gap: 8px;
+        margin: 0 0 14px;
         color: var(--blue);
-        font-size: 1.45rem;
+        font-size: 1.15rem;
     }
 
-    .home-heading span { white-space: nowrap; }
+    .home-heading span { white-space: normal; }
 
     .map-icon { margin-right: 7px; }
 
     #shelterMap {
-        height: 365px;
+        height: 280px;
         overflow: hidden;
         border-radius: 12px;
     }
 
+    .location-control {
+        display: flex;
+        width: 38px;
+        height: 38px;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid rgba(0, 0, 0, .2);
+        border-radius: 5px;
+        color: #2455a4;
+        background: #fff;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, .25);
+        cursor: pointer;
+        font-size: 1.35rem;
+        line-height: 1;
+    }
+
+    .location-control:hover,
+    .location-control:focus-visible { background: #edf4ff; }
+
+    .location-control.is-loading { cursor: wait; opacity: .65; }
+
+    .location-message {
+        position: absolute;
+        z-index: 500;
+        top: 10px;
+        left: 50%;
+        display: none;
+        max-width: calc(100% - 80px);
+        padding: 7px 12px;
+        transform: translateX(-50%);
+        border-radius: 6px;
+        color: #fff;
+        background: rgba(25, 61, 120, .9);
+        font-size: .85rem;
+        text-align: center;
+    }
+
+    .location-message.is-visible { display: block; }
+
+    .current-location-marker {
+        width: 18px;
+        height: 18px;
+        border: 3px solid #fff;
+        border-radius: 50%;
+        background: #2878df;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, .45);
+    }
+
     .weather-refresh {
+        display: block;
         color: #26934f;
-        font-size: .9rem;
+        font-size: .75rem;
         font-weight: 700;
     }
 
@@ -84,7 +133,7 @@
     .weather-status.has-warning .weather-icon { color: #df8a19; }
 
     .weather-warning-list {
-        margin: 0 0 12px 32px;
+        margin: 0 0 12px 0;
         padding: 10px 14px;
         border-left: 3px solid #df8a19;
         color: #8b5418;
@@ -98,16 +147,72 @@
         font-size: .92rem;
     }
 
+    .instruction-content {
+        padding: 20px 18px;
+        border-radius: 12px;
+        color: #4b5d75;
+        background: #f7f9fb;
+    }
+
+    .instruction-item {
+        padding: 4px 0 12px;
+        border-bottom: 1px solid #e4eaf2;
+    }
+
+    .instruction-item + .instruction-item { padding-top: 14px; }
+    .instruction-item:last-child { padding-bottom: 4px; border-bottom: 0; }
+
+    .instruction-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 7px 0;
+    }
+
+    .instruction-icon {
+        display: inline-flex;
+        width: 22px;
+        flex: 0 0 22px;
+        align-items: center;
+        justify-content: center;
+        color: #61738a;
+        font-size: 1.05rem;
+        line-height: 1.5;
+    }
+
+    .instruction-status {
+        color: #26934f;
+        font-weight: 700;
+    }
+
+    .instruction-status.is-active { color: #c46b16; }
+
+    .instruction-message {
+        color: #3d4f68;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+    }
+
+    .instruction-shelter {
+        color: #62748a;
+        font-size: .92rem;
+    }
+
+    .instruction-empty {
+        margin: 0;
+        color: #62748a;
+    }
+
     @media (max-width: 560px) {
-        .home-card { padding: 20px 16px; }
-        .home-heading { align-items: flex-start; flex-direction: column; font-size: 1.2rem; }
-        #shelterMap { height: 280px; }
+        .home-heading { align-items: flex-start; flex-direction: column; }
     }
 </style>
 
 <section class="home-card">
     <h2 class="home-heading"><span><span class="map-icon" aria-hidden="true">●</span>避難所マップ</span></h2>
-    <div id="shelterMap"></div>
+    <div id="shelterMap">
+        <div id="locationMessage" class="location-message" role="status" aria-live="polite"></div>
+    </div>
 </section>
 
 <section class="home-card">
@@ -118,14 +223,114 @@
     <div id="weatherContent"><p>読み込み中...</p></div>
 </section>
 
+<section class="home-card">
+    <h2 class="home-heading"><span><span aria-hidden="true">▣</span> 指示ボード</span></h2>
+    <div class="instruction-content">
+        {% if resident_notices %}
+            {% for notice in resident_notices %}
+                <article class="instruction-item">
+                    <div class="instruction-row instruction-status{% if notice.status not in ['解除', '完了'] %} is-active{% endif %}">
+                        <span class="instruction-icon" aria-hidden="true">{% if notice.status in ['解除', '完了'] %}✓{% else %}!{% endif %}</span>
+                        <span>{{ notice.status or '発信中' }}</span>
+                    </div>
+                    <div class="instruction-row instruction-message">
+                        <span class="instruction-icon" aria-hidden="true">▸</span>
+                        <span>{{ notice.content }}</span>
+                    </div>
+                    {% if notice.shelter %}
+                        <div class="instruction-row instruction-shelter">
+                            <span class="instruction-icon" aria-hidden="true">●</span>
+                            <span>避難先: {{ notice.shelter }}</span>
+                        </div>
+                    {% endif %}
+                </article>
+            {% endfor %}
+        {% else %}
+            <p class="instruction-empty">現在、住民向けの指示はありません</p>
+        {% endif %}
+    </div>
+</section>
+
 <!-- Leaflet の読み込み -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // 地図の初期化（藤沢市周辺を中心に設定）
-    const map = L.map('shelterMap').setView([35.3390, 139.4903], 12);
+    const aomoriCity = [40.8244, 140.7400];
+    const map = L.map('shelterMap').setView(aomoriCity, 12);
+    const locationMessage = document.getElementById('locationMessage');
+    let currentLocationMarker;
+
+    function showLocationMessage(message) {
+        locationMessage.textContent = message;
+        locationMessage.classList.add('is-visible');
+        window.setTimeout(function() {
+            locationMessage.classList.remove('is-visible');
+        }, 4000);
+    }
+
+    const LocationControl = L.Control.extend({
+        options: { position: 'topright' },
+        onAdd: function() {
+            const button = L.DomUtil.create('button', 'location-control');
+            button.type = 'button';
+            button.title = '現在地を表示';
+            button.setAttribute('aria-label', '現在地を表示');
+            button.textContent = '⌾';
+
+            L.DomEvent.disableClickPropagation(button);
+            L.DomEvent.on(button, 'click', function() {
+                if (!navigator.geolocation) {
+                    showLocationMessage('このブラウザでは位置情報を利用できません');
+                    return;
+                }
+
+                button.classList.add('is-loading');
+                button.disabled = true;
+                showLocationMessage('現在地を取得しています...');
+
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        const currentLocation = [
+                            position.coords.latitude,
+                            position.coords.longitude
+                        ];
+                        map.setView(currentLocation, 15);
+
+                        if (currentLocationMarker) {
+                            currentLocationMarker.setLatLng(currentLocation);
+                        } else {
+                            currentLocationMarker = L.marker(currentLocation, {
+                                icon: L.divIcon({
+                                    className: 'current-location-marker',
+                                    iconSize: [18, 18],
+                                    iconAnchor: [9, 9]
+                                })
+                            }).addTo(map);
+                        }
+
+                        showLocationMessage('現在地を表示しました');
+                        button.classList.remove('is-loading');
+                        button.disabled = false;
+                    },
+                    function(error) {
+                        const message = error.code === 1
+                            ? '位置情報の利用が許可されていません'
+                            : '現在地を取得できませんでした';
+                        showLocationMessage(message);
+                        button.classList.remove('is-loading');
+                        button.disabled = false;
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+                );
+            });
+
+            return button;
+        }
+    });
+
+    map.addControl(new LocationControl());
 
     // OpenStreetMapタイルを追加
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
