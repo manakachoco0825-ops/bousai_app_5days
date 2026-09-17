@@ -3,6 +3,90 @@
 {% block content %}
 <h2>避難所検索</h2>
 <p>登録されている避難所を確認できます。</p>
+<style>
+	.search-page { display: grid; gap: 16px; }
+	.map-area { margin: 0; }
+	#shelterSearchMap { height: 320px; overflow: hidden; border-radius: 10px; }
+	.search-form { display: grid; gap: 14px; padding: 18px; border: 1px solid #dfe7f2; border-radius: 10px; background: #fff; }
+	.search-form label { display: block; }
+	.search-form select { width: 100%; max-width: 480px; padding: 11px; font-size: 1rem; }
+	.filter-card { display: grid; gap: 8px; padding: 14px; border-radius: 8px; background: #f2f5f9; }
+	.filter-card legend { padding: 0 5px; font-weight: 700; }
+	.filter-card label { margin: 4px 0; }
+	.available-filter { padding: 14px; border: 2px solid #d86b16; border-radius: 8px; background: #fff5ec; }
+	.available-filter label { color: #8d430c; font-weight: 700; }
+	.search-submit { width: fit-content; padding: 12px 28px; border: 0; border-radius: 6px; color: #fff; background: var(--blue); font-size: 1rem; font-weight: 700; cursor: pointer; }
+	.search-submit:hover, .search-submit:focus-visible { background: var(--navy); }
+	.search-error { color: #a33a2b; font-weight: 700; }
+	@media (max-width: 560px) { #shelterSearchMap { height: 260px; } }
+</style>
 
-<p><a href="/all_shelters">全施設一覧</a></p>
+<section class="map-area" aria-label="避難所マップ">
+	<div id="shelterSearchMap"></div>
+</section>
+
+<form class="search-form" method="get" action="{{ url_for('search_results') }}" onsubmit="return validateDistrict();">
+	<label for="district">街を選択
+		<select id="district" name="district">
+			<option value="">街を選択してください</option>
+			{% for item in districts %}<option value="{{ item }}"{% if item == selected_district %} selected{% endif %}>{{ item }}</option>{% endfor %}
+		</select>
+	</label>
+	<div class="available-filter"><label><input type="checkbox" name="available"{% if 'available' in request.args %} checked{% endif %}> 空きのある施設だけ表示</label></div>
+	<fieldset class="filter-card">
+		<legend>その他の条件</legend>
+		<label><input type="checkbox" name="barrier_free"{% if 'barrier_free' in request.args %} checked{% endif %}> バリアフリー対応</label>
+		<label><input type="checkbox" name="pets"{% if 'pets' in request.args %} checked{% endif %}> ペット可</label>
+		<label><input type="checkbox" name="infant"{% if 'infant' in request.args %} checked{% endif %}> 乳幼児対応</label>
+		<label><input type="checkbox" name="parking"{% if 'parking' in request.args %} checked{% endif %}> 駐車場あり</label>
+	</fieldset>
+	<button class="search-submit" type="submit">検索する</button>
+	<p id="searchError" class="search-error" role="alert" hidden></p>
+</form>
+
+<p><a href="{{ url_for('index') }}">ホームへ戻る</a>{% if session.logged_in %} | <a href="{{ url_for('shelter_register') }}">避難所を登録する</a>{% endif %}</p>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script id="searchShelterData" type="application/json">{{ map_shelters|tojson }}</script>
+<script>
+const map = L.map('shelterSearchMap').setView([40.8244, 140.7400], 12);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+	attribution: 'Tiles &copy; Esri'
+}).addTo(map);
+const shelterMarkers = JSON.parse(document.getElementById('searchShelterData').textContent);
+shelterMarkers.forEach(function(shelter) {
+	if (Number.isFinite(Number(shelter.latitude)) && Number.isFinite(Number(shelter.longitude))) {
+		L.marker([shelter.latitude, shelter.longitude]).addTo(map)
+			.bindPopup('<strong>' + String(shelter.name || '未登録') + '</strong><br>' + String(shelter.address || '住所未登録'));
+	}
+});
+
+function validateDistrict() {
+	const district = document.getElementById('district');
+	const error = document.getElementById('searchError');
+	if (!district.value) {
+		alert('市区町村を選択してください。');
+		error.textContent = '市区町村を選択してください。';
+		error.hidden = false;
+		district.focus();
+		return false;
+	}
+	error.hidden = true;
+	return true;
+}
+
+if (navigator.geolocation) {
+	navigator.geolocation.getCurrentPosition(function(position) {
+		const current = [position.coords.latitude, position.coords.longitude];
+		L.circleMarker(current, { radius: 9, color: '#125dcc', fillColor: '#2878df', fillOpacity: 1, weight: 3 })
+			.addTo(map).bindPopup('現在地');
+		map.setView(current, 13);
+	}, function(error) {
+		console.warn('現在地を取得できませんでした:', error.message);
+	}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+} else {
+	console.warn('このブラウザでは位置情報を利用できません。');
+}
+</script>
 {% endblock %}

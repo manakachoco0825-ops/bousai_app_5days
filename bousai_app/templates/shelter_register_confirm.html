@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}避難所登録 - 最終確認{% endblock %}
+{% block content %}
+<style>
+  .confirm-card { padding: 20px; border: 1px solid #dfe7f2; border-radius: 10px; background: #fff; }
+  .confirm-list { display: grid; grid-template-columns: minmax(10rem, 30%) 1fr; gap: 8px 16px; }
+  .confirm-list dt { font-weight: 700; }
+  .shelter-confirm__image { width: 180px; height: 180px; object-fit: cover; border-radius: 10px; }
+  .confirm-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .confirm-actions button { padding: 11px 18px; border: 0; border-radius: 6px; color: #fff; background: var(--blue); font-weight: 700; }
+  .confirm-actions button:first-child { color: var(--ink); background: #e8eef6; }
+</style>
+<h2>避難所登録 - 最終確認</h2>
+<section class="confirm-card">
+  {% if shelter.image %}<img class="shelter-confirm__image" src="{{ shelter.image }}" alt="{{ shelter.name }}の施設画像">{% endif %}
+  <dl class="confirm-list">
+    <dt>避難所名</dt><dd>{{ shelter.name }}</dd>
+    <dt>郵便番号</dt><dd>{{ shelter.postal_code }}</dd>
+    <dt>住所</dt><dd>{{ shelter.address }}</dd>
+    <dt>地図上の位置</dt><dd>{% if shelter.latitude is not none and shelter.longitude is not none %}{{ shelter.latitude }}, {{ shelter.longitude }}{% else %}未登録（地図にピンは表示されません）{% endif %}</dd>
+    <dt>電話番号</dt><dd>{{ shelter.phone or '未登録' }}</dd>
+    <dt>メールアドレス</dt><dd>{{ shelter.email or '未登録' }}</dd>
+    <dt>開設状況</dt><dd>{{ shelter.status }}</dd>
+    <dt>最大収容人数</dt><dd>{{ shelter.capacity if shelter.capacity is not none else '未登録' }}</dd>
+    <dt>対応災害</dt><dd>{{ shelter.disasters|join('、') }}</dd>
+    <dt>設備情報</dt><dd>{{ shelter.facilities|join('、') or '未登録' }}</dd>
+    <dt>バリアフリー情報</dt><dd>{{ shelter.accessibility|join('、') or '未登録' }}</dd>
+    <dt>ペット同行避難</dt><dd>{{ shelter.pet_policy }}</dd>
+  </dl>
+  <div class="confirm-actions">
+    <form method="post"><button name="action" value="edit" type="submit">修正する</button></form>
+    <form method="post"><button name="action" value="confirm" type="submit">この内容で登録する</button></form>
+  </div>
+</section>
+{% endblock %}

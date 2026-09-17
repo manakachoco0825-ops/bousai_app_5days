@@ -4,7 +4,11 @@ from functools import wraps
 import json
 import os
 import urllib.request
+import math
+import re
+import uuid
 from datetime import datetime, timedelta, timezone
+from werkzeug.utils import secure_filename
 
 # app.py はプロジェクト直下に置く。
 # 実体（templates / static / data）は bousai_app/ 配下にあるので、そこを参照する。
@@ -82,6 +86,7 @@ WARNING_CODES = {
 # サンプルデータの読み込み
 DATA_FILE = os.path.join(APP_DIR, 'data', 'shelters.json')
 INSTRUCTIONS_FILE = os.path.join(APP_DIR, 'data', 'instructions.json')
+CROWD_FILE = os.path.join(APP_DIR, 'data', 'crowd_reports.json')
 
 def load_json(path, default):
     """JSONファイルを読み込む（存在しない・壊れている場合は default を返す）"""
@@ -93,6 +98,95 @@ def load_json(path, default):
 
 shelters = load_json(DATA_FILE, [])
 instructions = load_json(INSTRUCTIONS_FILE, [])
+crowd_reports = load_json(CROWD_FILE, [])
+
+DISASTER_OPTIONS = ['地震', '津波', '洪水', '土砂災害', '台風・大雨', '火災']
+ACCESSIBILITY_OPTIONS = ['車いす対応', 'スロープ', '点字案内', '音声案内', '多目的トイレ']
+OPEN_STATUS_OPTIONS = ['開設中', '開設予定', '閉鎖中']
+PET_OPTIONS = ['可', '条件付き', '不可']
+CROWD_OPTIONS = ['空', '混', '満']
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+UPLOAD_DIR = os.path.join(APP_DIR, 'static', 'uploads')
+REGISTER_DISASTER_OPTIONS = DISASTER_OPTIONS + ['その他']
+REGISTER_FACILITY_OPTIONS = ['飲料水', '食料', '毛布', 'トイレ', '駐車場', '乳幼児対応', 'その他']
+REGISTER_ACCESSIBILITY_OPTIONS = ACCESSIBILITY_OPTIONS + ['その他']
+
+def save_crowd_reports():
+    """混雑投稿履歴をファイルに保存する"""
+    try:
+        with open(CROWD_FILE, 'w', encoding='utf-8') as f:
+            json.dump(crowd_reports, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def normalize_shelter(shelter):
+    """旧形式の避難所データにも表示用の既定値を補う"""
+    normalized = dict(shelter)
+    for key in ('disasters', 'accessibility'):
+        value = normalized.get(key, [])
+        normalized[key] = value if isinstance(value, list) else [value]
+    for key in ('address', 'area', 'facilities', 'contact', 'opening_status', 'pet_policy'):
+        normalized.setdefault(key, '')
+    normalized.setdefault('latitude', None)
+    normalized.setdefault('longitude', None)
+    if (normalized['latitude'] is None or normalized['longitude'] is None) and AREA_NAME in normalized.get('address', ''):
+        # 旧データに座標がない場合は対象地域の代表地点を表示する。
+        normalized['latitude'] = 40.8244
+        normalized['longitude'] = 140.7400
+    district = normalized.get('district') or normalized.get('area', '')
+    if not district and AREA_NAME in normalized.get('address', ''):
+        district = AREA_NAME
+    normalized['district'] = district
+    normalized.setdefault('available', None)
+    normalized.setdefault('infant', False)
+    normalized.setdefault('parking', False)
+    return normalized
+
+def parse_posted_at(value):
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(JST)
+    except (AttributeError, ValueError):
+        return None
+
+def crowd_summary(shelter_id):
+    """直近3時間の混雑投稿を集計し、30日超の履歴を整理する"""
+    now = datetime.now(JST)
+    active = []
+    retained = []
+    for report in crowd_reports:
+        posted_at = parse_posted_at(report.get('posted_at'))
+        if not posted_at:
+            retained.append(report)
+            continue
+        if now - posted_at <= timedelta(days=30):
+            retained.append(report)
+        if report.get('shelter_id') == shelter_id and now - posted_at <= timedelta(hours=3):
+            if report.get('status') in CROWD_OPTIONS:
+                active.append((report, posted_at))
+    if len(retained) != len(crowd_reports):
+        crowd_reports[:] = retained
+        save_crowd_reports()
+    counts = {status: 0 for status in CROWD_OPTIONS}
+    for report, _ in active:
+        counts[report['status']] += 1
+    latest_by_status = {status: max((posted for report, posted in active if report['status'] == status), default=None)
+                        for status in CROWD_OPTIONS}
+    latest = max((posted for _, posted in active), default=None)
+    if active:
+        status = max(CROWD_OPTIONS, key=lambda item: (counts[item], latest_by_status[item] or datetime.min.replace(tzinfo=JST)))
+    else:
+        status = '情報なし'
+    return {
+        'status': status,
+        'counts': counts,
+        'total': len(active),
+        'latest': latest.strftime('%Y年%m月%d日 %H:%M') if latest else None,
+    }
+
+def enrich_shelter(shelter):
+    normalized = normalize_shelter(shelter)
+    normalized['crowd'] = crowd_summary(normalized.get('id'))
+    return normalized
 
 def save_instructions():
     """指示ボードのデータをファイルに保存する"""
@@ -110,6 +204,94 @@ def save_shelters():
             json.dump(shelters, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+def recent_shelters():
+    """登録日時の新しい避難所を上位から返す"""
+    return sorted(shelters, key=lambda item: item.get('latest_updated_at', ''), reverse=True)[:5]
+
+def register_form_context(form=None, errors=None, success=None):
+    return {
+        'form': form or {},
+        'errors': errors or [],
+        'success': success,
+        'disaster_options': REGISTER_DISASTER_OPTIONS,
+        'facility_options': REGISTER_FACILITY_OPTIONS,
+        'accessibility_options': REGISTER_ACCESSIBILITY_OPTIONS,
+        'opening_status_options': OPEN_STATUS_OPTIONS,
+        'pet_options': PET_OPTIONS,
+        'recent_shelters': recent_shelters(),
+    }
+
+def validate_registration(form):
+    errors = []
+    name = form.get('name', '').strip()
+    postal_code = re.sub(r'[-ー]', '', form.get('postal_code', '').strip())
+    address = form.get('address', '').strip()
+    phone = form.get('phone', '').strip()
+    email = form.get('email', '').strip()
+    status = form.get('status', '').strip()
+    capacity = form.get('capacity', '').strip()
+    disasters = form.getlist('disasters')
+    pet_policy = form.get('pet_policy', '').strip()
+    if not name or not postal_code or not address or not status or not disasters or not pet_policy:
+        errors.append('未入力の必須項目があります。確認してください。')
+    if postal_code and not re.fullmatch(r'\d{7}', postal_code):
+        errors.append('郵便番号は7桁の数字で入力してください。')
+    if phone and not re.fullmatch(r'[0-9０-９+()（）\-ー ]{8,20}', phone):
+        errors.append('電話番号の形式が正しくありません。')
+    if email and not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
+        errors.append('メールアドレスの形式が正しくありません。')
+    if capacity and (not capacity.isdigit() or int(capacity) < 0):
+        errors.append('最大収容人数は0以上の整数で入力してください。')
+    if status and status not in OPEN_STATUS_OPTIONS:
+        errors.append('開設状況の選択が正しくありません。')
+    if pet_policy and pet_policy not in PET_OPTIONS:
+        errors.append('ペット同行避難の選択が正しくありません。')
+    return errors
+
+def save_uploaded_image(file):
+    if not file or not file.filename:
+        return None
+    filename = secure_filename(file.filename)
+    extension = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError('施設画像はpng、jpg、jpeg、gif、webp形式のみ対応しています。')
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    stored_name = f'{uuid.uuid4().hex}.{extension}'
+    file.save(os.path.join(UPLOAD_DIR, stored_name))
+    return url_for('static', filename=f'uploads/{stored_name}')
+
+def registration_payload(form, image_url=None):
+    def coordinate_value(field):
+        value = form.get(field, '').strip()
+        try:
+            return float(value) if value else None
+        except ValueError:
+            return None
+
+    payload = {
+        'name': form.get('name', '').strip(),
+        'district': form.get('district', '').strip() or AREA_NAME,
+        'area': form.get('area', '').strip() or AREA_NAME,
+        'postal_code': re.sub(r'[-ー]', '', form.get('postal_code', '').strip()),
+        'address': form.get('address', '').strip(),
+        'latitude': coordinate_value('latitude'),
+        'longitude': coordinate_value('longitude'),
+        'phone': form.get('phone', '').strip(),
+        'email': form.get('email', '').strip(),
+        'status': form.get('status', '').strip(),
+        'capacity': int(form.get('capacity')) if form.get('capacity', '').isdigit() else None,
+        'disasters': form.getlist('disasters'),
+        'disaster_other': form.get('disaster_other', '').strip(),
+        'facilities': form.getlist('facilities'),
+        'facility_other': form.get('facility_other', '').strip(),
+        'accessibility': form.getlist('accessibility'),
+        'accessibility_other': form.get('accessibility_other', '').strip(),
+        'pet_policy': form.get('pet_policy', '').strip(),
+        'latest_updated_at': form.get('latest_updated_at', '').strip() or datetime.now(JST).isoformat(),
+        'image': image_url or form.get('image', ''),
+    }
+    return payload
 # ────────────────────────────────
 
 # ────────────────────────────────
@@ -148,9 +330,30 @@ def format_report_time(iso_str):
         return iso_str
 
 
-def filter_shelters(district=None):
-    """district 指定があれば一致する避難所のみ、なければ全件を返す"""
-    return [s for s in shelters if not district or s.get('district') == district]
+def filter_shelters(district=None, filters=None):
+    """地区と検索チェックボックスで避難所を絞り込む"""
+    filters = filters or set()
+    filtered = []
+    for shelter in shelters:
+        normalized = normalize_shelter(shelter)
+        shelter_district = normalized.get('district') or normalized.get('area', '')
+        if district and shelter_district != district:
+            continue
+        if 'available' in filters:
+            crowd = crowd_summary(normalized.get('id'))
+            if normalized.get('available') is not True and crowd['status'] != '空':
+                continue
+        if 'barrier_free' in filters and not normalized.get('accessibility'):
+            continue
+        if 'pets' in filters and normalized.get('pet_policy') != '可':
+            continue
+        facilities = str(normalized.get('facilities', ''))
+        if 'infant' in filters and not (normalized.get('infant') is True or '乳幼児' in facilities):
+            continue
+        if 'parking' in filters and not (normalized.get('parking') is True or '駐車場' in facilities):
+            continue
+        filtered.append(shelter)
+    return filtered
 
 
 def parse_area_warnings(warning_data):
@@ -246,17 +449,21 @@ def get_weather_warnings():
 @app.route('/')
 def index():
     resident_notices = [i for i in instructions if i.get('target') == '住民']
-    return render_template('index.html', resident_notices=resident_notices)
+    return render_template(
+        'index.html',
+        resident_notices=resident_notices,
+        map_shelters=[normalize_shelter(s) for s in shelters],
+    )
 
 # ログインページ
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # リダイレクト先を取得（デフォルトは避難所登録画面）
+    # リダイレクト先を取得（デフォルトはホーム画面）
     next_url = request.args.get('next') or request.form.get('next')
 
     # 安全でないURLの場合はデフォルトページにリダイレクト
     if not next_url or not is_safe_url(next_url):
-        next_url = url_for('shelter_register')
+        next_url = url_for('index')
 
     if request.method == 'POST':
         password = request.form.get('password', '').strip()
@@ -291,34 +498,75 @@ def logout():
 @login_required
 def shelter_register():
     if request.method == 'POST':
-        name = request.form.get('name', '').strip()
-        if not name:
-            return render_template(
-                'shelter_register.html',
-                error=True,
-                message='避難所名を入力してください'
-            )
+        errors = validate_registration(request.form)
+        try:
+            image_url = save_uploaded_image(request.files.get('image'))
+        except ValueError as error:
+            errors.append(str(error))
+            image_url = None
+        if errors:
+            return render_template('shelter_register.html', **register_form_context(request.form, errors))
+        session['shelter_register_draft'] = registration_payload(request.form, image_url)
+        return redirect(url_for('shelter_register_confirm'))
 
+    form = session.get('shelter_register_draft', {})
+    return render_template('shelter_register.html', **register_form_context(form, success=request.args.get('success')))
+
+@app.route('/shelter_register/confirm', methods=['GET', 'POST'])
+@login_required
+def shelter_register_confirm():
+    draft = session.get('shelter_register_draft')
+    if not draft:
+        return redirect(url_for('shelter_register'))
+    if request.method == 'POST':
+        if request.form.get('action') == 'edit':
+            return redirect(url_for('shelter_register'))
         next_id = max((shelter.get('id', 0) for shelter in shelters), default=0) + 1
-        shelters.append({'id': next_id, 'name': name})
+        shelters.append({'id': next_id, **draft})
         save_shelters()
-        return render_template(
-            'shelter_register.html',
-            success=True,
-            message='避難所を登録しました。'
-        )
+        session.pop('shelter_register_draft', None)
+        return redirect(url_for('shelter_register', success='1'))
+    return render_template('shelter_register_confirm.html', shelter=draft)
 
-    return render_template('shelter_register.html')
+@app.route('/shelter_delete', methods=['POST'])
+@login_required
+def shelter_delete():
+    try:
+        shelter_id = int(request.form.get('delete_id', ''))
+    except ValueError:
+        return redirect(url_for('shelter_register'))
+    shelters[:] = [shelter for shelter in shelters if shelter.get('id') != shelter_id]
+    save_shelters()
+    return redirect(url_for('shelter_register'))
+
+@app.route('/api/save_draft', methods=['POST'])
+@login_required
+def save_draft():
+    draft = request.get_json(silent=True) or request.form.to_dict(flat=False)
+    session['shelter_register_draft'] = draft
+    session.modified = True
+    return jsonify({'ok': True})
 
 # 避難所検索ページ
 @app.route('/shelter_search')
 def shelter_search():
-    return render_template('shelter_search.html')
+    districts = sorted({normalize_shelter(s).get('district') or normalize_shelter(s).get('area')
+                        for s in shelters if normalize_shelter(s).get('district') or normalize_shelter(s).get('area')})
+    if not districts:
+        districts = [AREA_NAME]
+    return render_template(
+        'shelter_search.html',
+        name=request.args.get('name', ''),
+        area=request.args.get('area', ''),
+        selected_district=request.args.get('district', ''),
+        districts=districts,
+        map_shelters=[normalize_shelter(s) for s in shelters],
+    )
 
 # 全施設一覧ページ
 @app.route('/all_shelters')
 def all_shelters():
-    return render_template('search_results.html', results=shelters)
+    return redirect(url_for('search_results'))
 
 
 # 指示ボード：住民向けの指示を一覧で確認する
@@ -331,25 +579,53 @@ def board():
 # 検索結果ページ：templates/search_results.html を返す
 @app.route('/search_results')
 def search_results():
-    results = filter_shelters(request.args.get('district'))
-    return render_template('search_results.html', results=results)
+    name = request.args.get('name', '').strip()
+    area = request.args.get('area', '').strip()
+    district = request.args.get('district', '').strip()
+    filters = {key for key in ('available', 'barrier_free', 'pets', 'infant', 'parking') if request.args.get(key) == 'on'}
+    results = [s for s in filter_shelters(district, filters) if district
+               if (not name or name in s.get('name', ''))
+               and (not area or area in s.get('area', s.get('district', '')))]
+    return render_template(
+        'search_results.html',
+        results=[enrich_shelter(s) for s in results],
+        name=name,
+        area=area,
+        district=district,
+        filters=filters,
+    )
+
+@app.route('/crowd_reports', methods=['POST'])
+def add_crowd_report():
+    status = request.form.get('status', '')
+    redirect_params = {
+        'name': request.form.get('name', ''),
+        'area': request.form.get('area', ''),
+        'district': request.form.get('district', ''),
+    }
+    for filter_name in ('available', 'barrier_free', 'pets', 'infant', 'parking'):
+        if request.form.get(filter_name) == 'on':
+            redirect_params[filter_name] = 'on'
+    try:
+        shelter_id = int(request.form.get('shelter_id', ''))
+    except ValueError:
+        return redirect(url_for('search_results', **redirect_params))
+    if status in CROWD_OPTIONS and any(s.get('id') == shelter_id for s in shelters):
+        crowd_reports.append({'shelter_id': shelter_id, 'status': status, 'posted_at': datetime.now(JST).isoformat()})
+        save_crowd_reports()
+    return redirect(url_for('search_results', **redirect_params))
 
 # JSON API：/shelters?district=地区名
 @app.route('/shelters', methods=['GET'])
 def get_shelters():
-    results = filter_shelters(request.args.get('district'))
-
+    results = [enrich_shelter(s) for s in filter_shelters(request.args.get('district'))]
     if not results:
-        # 見つからなければエラー JSON を返す
         return jsonify({'error': 'No shelters found'}), 404
-
-    # 見つかったらリストを JSON で返す
     return jsonify(results)
 
 # 気象警報・注意報API
 @app.route('/api/weather_warnings')
 def api_weather_warnings():
-    """気象警報・注意報をJSON形式で返すAPI"""
     return jsonify(get_weather_warnings())
 
 if __name__ == '__main__':

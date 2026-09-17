@@ -1,23 +1,88 @@
 {% extends "base.html" %}
-
+{% block title %}避難所登録{% endblock %}
 {% block content %}
-<h2>避難所登録</h2>
-<p>新しい避難所情報を登録します。</p>
+<style>
+  .register-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+  .required-note, .required-mark { color: #b52f2f; font-weight: 700; }
+  .page-heading__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .delete-action { padding: 8px 12px; border: 1px solid #b52f2f; border-radius: 6px; color: #b52f2f; background: #fff; cursor: pointer; }
+  .register-card { padding: 20px; border: 1px solid #dfe7f2; border-radius: 10px; background: #fff; }
+  .register-form { display: grid; gap: 14px; }
+  .register-form fieldset { display: grid; gap: 6px; border: 1px solid #dfe7f2; border-radius: 8px; padding: 14px; }
+  .register-form label { display: grid; gap: 4px; }
+  .register-form input[type="text"], .register-form input[type="email"], .register-form input[type="number"], .register-form input[type="file"], .register-form input[type="datetime-local"], .register-form select { width: 100%; padding: 9px; }
+  .register-form input[type="checkbox"] { width: auto; margin-right: 6px; }
+  .check-label { display: block !important; }
+  .register-submit { width: fit-content; padding: 11px 24px; border: 0; border-radius: 6px; color: #fff; background: var(--blue); font-weight: 700; cursor: pointer; }
+  .form-errors { margin: 0 0 14px; padding: 12px 16px; border: 1px solid #e5a5a5; border-radius: 6px; color: #8d2525; background: #fff0f0; }
+  .form-errors p { margin: 3px 0; }
+  .shelter-preview { margin-top: 22px; }
+  .preview-card { padding: 14px; border: 1px solid #dfe7f2; border-radius: 8px; background: #fff; }
+  .recent-shelter-list { display: grid; gap: 8px; padding: 0; list-style: none; }
+  .recent-shelter-item { display: flex; min-height: 72px; gap: 12px; align-items: center; padding: 8px; border: 1px solid #e1e8f1; border-radius: 8px; background: #fff; }
+  .recent-shelter-item__image, .shelter-thumb { width: 64px; height: 64px; flex: 0 0 64px; object-fit: cover; border-radius: 7px; background: #eef3f8; }
+</style>
 
-<!-- 成功・エラーメッセージ表示 -->
-{% if success %}
-  <p>{{ message }}</p>
-{% endif %}
+<div class="register-head">
+  <div><h2>避難所登録</h2><p>避難所の情報を入力し、確認してから登録してください。</p></div>
+  <div class="page-heading__actions">
+    <span class="required-note">* 必須項目</span>
+    {% if recent_shelters %}<form method="post" action="{{ url_for('shelter_delete') }}" onsubmit="return confirm('選択した避難所を削除しますか？');"><select name="delete_id" aria-label="削除する避難所"><option value="">削除対象を選択</option>{% for item in recent_shelters %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select><button class="delete-action" type="submit">避難所を削除</button></form>{% else %}<button class="delete-action" type="button" disabled>避難所を削除</button>{% endif %}
+  </div>
+</div>
 
-{% if error %}
-  <p>{{ message }}</p>
-{% endif %}
+{% if success %}<p role="status">避難所を登録しました。</p>{% endif %}
+{% if errors %}<div class="form-errors" role="alert">{% for error in errors %}<p>{{ error }}</p>{% endfor %}</div>{% endif %}
 
-<form method="POST">
-  <p>
-    <label for="name">避難所名（必須）</label><br>
-    <input type="text" id="name" name="name">
-  </p>
-  <p><button type="submit">登録</button></p>
+<section class="register-card">
+<form class="register-form" method="post" enctype="multipart/form-data" id="shelterRegisterForm">
+  <label>避難所名 <span class="required-mark">*</span><input type="text" name="name" value="{{ form.get('name', '') if form else '' }}" required></label>
+  <label>郵便番号 <span class="required-mark">*</span><input type="text" id="postal_code" name="postal_code" inputmode="numeric" placeholder="0000000" value="{{ form.get('postal_code', '') if form else '' }}" required></label>
+  <label>住所 <span class="required-mark">*</span><input type="text" id="address" name="address" value="{{ form.get('address', '') if form else '' }}" required></label>
+  <fieldset><legend>地図上の位置</legend>
+    <label>緯度<input type="number" step="any" name="latitude" value="{{ form.get('latitude', '') if form else '' }}" placeholder="例: 40.8244"></label>
+    <label>経度<input type="number" step="any" name="longitude" value="{{ form.get('longitude', '') if form else '' }}" placeholder="例: 140.7400"></label>
+    <small>緯度・経度を入力すると、ホーム・検索・結果画面の地図にピン表示されます。</small>
+  </fieldset>
+  <label>電話番号<input type="text" name="phone" value="{{ form.get('phone', '') if form else '' }}"></label>
+  <label>メールアドレス<input type="email" name="email" value="{{ form.get('email', '') if form else '' }}"></label>
+  <label>開設状況 <span class="required-mark">*</span><select name="status" required><option value="">選択してください</option>{% for option in opening_status_options %}<option value="{{ option }}"{% if form and form.get('status') == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></label>
+  <label>最大収容人数<input type="number" name="capacity" min="0" step="1" value="{{ form.get('capacity', '') if form else '' }}"></label>
+  <fieldset><legend>対応災害 <span class="required-mark">*</span></legend>{% for option in disaster_options %}<label class="check-label"><input type="checkbox" name="disasters" value="{{ option }}">{{ option }}</label>{% endfor %}<input type="text" name="disaster_other" placeholder="その他の内容"></fieldset>
+  <fieldset><legend>設備情報</legend>{% for option in facility_options %}<label class="check-label"><input type="checkbox" name="facilities" value="{{ option }}">{{ option }}</label>{% endfor %}<input type="text" name="facility_other" placeholder="その他の内容"></fieldset>
+  <fieldset><legend>バリアフリー情報</legend>{% for option in accessibility_options %}<label class="check-label"><input type="checkbox" name="accessibility" value="{{ option }}">{{ option }}</label>{% endfor %}<input type="text" name="accessibility_other" placeholder="その他の内容"></fieldset>
+  <label>ペット同行避難 <span class="required-mark">*</span><select name="pet_policy" required><option value="">選択してください</option>{% for option in pet_options %}<option value="{{ option }}">{{ option }}</option>{% endfor %}</select></label>
+  <label>最終更新日時<input type="datetime-local" name="latest_updated_at" value="{{ form.get('latest_updated_at', '') if form else '' }}"></label>
+  <label>施設画像添付<input type="file" name="image" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"></label>
+  <button class="register-submit" type="submit">登録内容を確認する</button>
 </form>
+</section>
+
+<p><a href="{{ url_for('shelter_search') }}">避難所を検索する</a> | <a href="{{ url_for('search_results') }}">検索結果を表示する</a></p>
+
+<section class="shelter-preview preview-card"><h3>最近登録した避難所</h3>{% if recent_shelters %}<ul class="recent-shelter-list">{% for shelter in recent_shelters %}<li class="recent-shelter-item">{% if shelter.image %}<img class="recent-shelter-item__image shelter-thumb" src="{{ shelter.image }}" alt="{{ shelter.name }}の施設画像">{% else %}<span class="recent-shelter-item__image" aria-hidden="true"></span>{% endif %}<span>{{ shelter.name }}<br><small>{{ shelter.address or '住所未登録' }}</small></span></li>{% endfor %}</ul>{% else %}<p>登録済みの避難所はありません。</p>{% endif %}</section>
+
+<script>
+const postalCode = document.getElementById('postal_code');
+postalCode.addEventListener('change', function() {
+  const code = this.value.replace(/[-ー]/g, '');
+  if (!/^\d{7}$/.test(code)) return;
+  fetch('https://zipcloud.ibsnet.co.jp/api/search?zipcode=' + code).then(response => response.json()).then(data => {
+    if (data.results && data.results[0]) {
+      const result = data.results[0];
+      document.getElementById('address').value = result.address1 + result.address2 + result.address3;
+    }
+  }).catch(() => {});
+});
+const form = document.getElementById('shelterRegisterForm');
+let draftTimer;
+form.addEventListener('input', function() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(function() {
+    const data = new FormData(form); const draft = {};
+    data.forEach((value, key) => { if (key !== 'image') draft[key] = draft[key] ? [].concat(draft[key], value) : value; });
+    fetch('{{ url_for("save_draft") }}', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(draft) }).catch(() => {});
+  }, 700);
+});
+</script>
 {% endblock %}

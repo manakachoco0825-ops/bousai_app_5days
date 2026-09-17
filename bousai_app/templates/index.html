@@ -23,7 +23,10 @@
 
     .home-heading span { white-space: normal; }
 
-    .map-icon { margin-right: 7px; }
+    .map-icon {
+        margin-right: 7px;
+        font-size: 1.15em;
+    }
 
     #shelterMap {
         height: 280px;
@@ -203,13 +206,53 @@
         color: #62748a;
     }
 
+    .home-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .home-action {
+        display: inline-block;
+        padding: 10px 16px;
+        border-radius: 6px;
+        color: #fff;
+        background: var(--blue);
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .home-action:hover,
+    .home-action:focus-visible { background: var(--navy); }
+
+    .home-action.search-action {
+        color: #fff;
+        background: #d86b16;
+    }
+
+    .home-action.search-action:hover,
+    .home-action.search-action:focus-visible { background: #b9570f; }
+
     @media (max-width: 560px) {
         .home-heading { align-items: flex-start; flex-direction: column; }
     }
 </style>
 
+<nav class="home-actions" aria-label="ホームメニュー">
+    {% if session.logged_in %}
+        <a class="home-action" href="/shelter_register">避難所登録</a>
+        <a class="home-action" href="/board">指示ボード</a>
+        <a class="home-action search-action" href="/shelter_search">避難所検索</a>
+        <a class="home-action" href="/logout">ログアウト</a>
+    {% else %}
+        <a class="home-action" href="/login">ログイン</a>
+        <a class="home-action search-action" href="/shelter_search">避難所検索</a>
+    {% endif %}
+</nav>
+
 <section class="home-card">
-    <h2 class="home-heading"><span><span class="map-icon" aria-hidden="true">●</span>避難所マップ</span></h2>
+    <h2 class="home-heading"><span><span class="map-icon" aria-hidden="true">📍</span>避難所マップ</span></h2>
     <div id="shelterMap">
         <div id="locationMessage" class="location-message" role="status" aria-live="polite"></div>
     </div>
@@ -224,7 +267,7 @@
 </section>
 
 <section class="home-card">
-    <h2 class="home-heading"><span><span aria-hidden="true">▣</span> 指示ボード</span></h2>
+    <h2 class="home-heading"><span><span aria-hidden="true">▣</span> 避難・防災のお知らせ</span></h2>
     <div class="instruction-content">
         {% if resident_notices %}
             {% for notice in resident_notices %}
@@ -254,13 +297,11 @@
 <!-- Leaflet の読み込み -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script id="homeShelterData" type="application/json">{{ map_shelters|tojson }}</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const aomoriCity = [40.8244, 140.7400];
-    const map = L.map('shelterMap').setView(aomoriCity, 12);
     const locationMessage = document.getElementById('locationMessage');
-    let currentLocationMarker;
 
     function showLocationMessage(message) {
         locationMessage.textContent = message;
@@ -269,6 +310,10 @@ document.addEventListener('DOMContentLoaded', function() {
             locationMessage.classList.remove('is-visible');
         }, 4000);
     }
+
+    const aomoriCity = [40.8244, 140.7400];
+    const map = L.map('shelterMap').setView(aomoriCity, 12);
+    let currentLocationMarker;
 
     const LocationControl = L.Control.extend({
         options: { position: 'topright' },
@@ -332,12 +377,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     map.addControl(new LocationControl());
 
-    // OpenStreetMapタイルを追加
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+    const shelterMarkers = JSON.parse(document.getElementById('homeShelterData').textContent);
+    shelterMarkers.forEach(function(shelter) {
+        if (Number.isFinite(Number(shelter.latitude)) && Number.isFinite(Number(shelter.longitude))) {
+            L.marker([shelter.latitude, shelter.longitude])
+                .addTo(map)
+                .bindPopup('<strong>' + shelter.name + '</strong><br>' + (shelter.address || '住所未登録'));
+        }
+    });
+
+    // APIキー不要のEsri地図タイルを使用
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri',
         referrerPolicy: 'strict-origin-when-cross-origin'
     }).addTo(map);
-
     // 気象警報・注意報の自動更新機能
     function updateWeatherWarnings() {
         fetch('/api/weather_warnings')

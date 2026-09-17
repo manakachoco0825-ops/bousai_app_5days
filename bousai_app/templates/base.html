@@ -45,72 +45,24 @@
       letter-spacing: .04em;
     }
 
-    .menu-toggle {
-      display: grid;
-      width: 44px;
-      height: 44px;
-      padding: 10px;
-      place-items: center;
-      border: 0;
+    .home-button {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      padding: 8px 12px;
+      border: 1px solid rgba(255, 255, 255, .7);
       border-radius: 6px;
       background: transparent;
       cursor: pointer;
-    }
-
-    .menu-toggle:hover,
-    .menu-toggle:focus-visible { background: rgba(255, 255, 255, .16); }
-
-    .menu-icon,
-    .menu-icon::before,
-    .menu-icon::after {
-      display: block;
-      width: 23px;
-      height: 3px;
-      border-radius: 2px;
-      background: #fff;
-      content: "";
-      transition: transform .2s ease;
-    }
-
-    .menu-icon::before { transform: translateY(-7px); }
-    .menu-icon::after { transform: translateY(4px); }
-
-    .menu-toggle[aria-expanded="true"] .menu-icon { background: transparent; }
-    .menu-toggle[aria-expanded="true"] .menu-icon::before { transform: translateY(1px) rotate(45deg); }
-    .menu-toggle[aria-expanded="true"] .menu-icon::after { transform: translateY(-2px) rotate(-45deg); }
-
-    .menu-panel {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: max(24px, calc((100% - 1160px) / 2));
-      display: none;
-      width: min(270px, calc(100vw - 32px));
-      padding: 8px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: 0 12px 30px rgba(30, 66, 120, .18);
-    }
-
-    .menu-panel.is-open { display: block; }
-
-    .menu-panel a {
-      display: block;
-      padding: 11px 14px;
-      border-radius: 6px;
-      color: var(--ink);
-      font-weight: 600;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1;
       text-decoration: none;
     }
 
-    .menu-panel a:hover,
-    .menu-panel a:focus-visible { background: #edf4ff; }
-
-    .menu-status {
-      margin: 4px 14px 8px;
-      color: var(--muted);
-      font-size: .85rem;
-    }
+    .home-button:hover,
+    .home-button:focus-visible { background: rgba(255, 255, 255, .16); }
 
     main {
       width: min(920px, calc(100% - 32px));
@@ -128,21 +80,7 @@
 <body>
   <header class="site-header">
     <h1 class="site-title">防災アプリ</h1>
-    <button class="menu-toggle" type="button" aria-label="メニューを開く" aria-expanded="false" aria-controls="site-menu">
-      <span class="menu-icon"></span>
-    </button>
-    <nav id="site-menu" class="menu-panel" aria-label="メインメニュー">
-      <a href="/">ホーム</a>
-      <a href="/shelter_search">避難所検索</a>
-      <a href="/shelter_register">避難所登録</a>
-      <a href="/board">指示ボード</a>
-      {% if session.logged_in %}
-        <p class="menu-status">ログイン中{% if session.username %}（{{ session.username }}）{% endif %}</p>
-        <a href="/logout">ログアウト</a>
-      {% else %}
-        <a href="/login">ログイン</a>
-      {% endif %}
-    </nav>
+    <a class="home-button" href="/" aria-label="ホームへ戻る" title="ホームへ戻る">ホームへ戻る</a>
   </header>
 
   <main>
@@ -150,23 +88,5 @@
     {% block content %}{% endblock %}
   </main>
 
-  <script>
-    const menuToggle = document.querySelector('.menu-toggle');
-    const siteMenu = document.querySelector('#site-menu');
-
-    menuToggle.addEventListener('click', function() {
-      const isOpen = siteMenu.classList.toggle('is-open');
-      menuToggle.setAttribute('aria-expanded', String(isOpen));
-      menuToggle.setAttribute('aria-label', isOpen ? 'メニューを閉じる' : 'メニューを開く');
-    });
-
-    document.addEventListener('click', function(event) {
-      if (!siteMenu.contains(event.target) && !menuToggle.contains(event.target)) {
-        siteMenu.classList.remove('is-open');
-        menuToggle.setAttribute('aria-expanded', 'false');
-        menuToggle.setAttribute('aria-label', 'メニューを開く');
-      }
-    });
-  </script>
 </body>
 </html>

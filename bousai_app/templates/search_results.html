@@ -1,20 +1,93 @@
 {% extends "base.html" %}
 
+{% block title %}避難所検索結果表示画面{% endblock %}
 {% block content %}
-<h2>検索結果</h2>
+<style>
+  .results-map { height: 300px; margin: 16px 0; border-radius: 8px; }
+  .table-wrap { overflow-x: auto; }
+  .results-table { width: 100%; min-width: 1120px; border-collapse: collapse; background: #fff; }
+  .results-table th, .results-table td { padding: 9px; border: 1px solid #dfe7f2; vertical-align: top; text-align: left; }
+  .results-table th { color: var(--ink); background: #eef4fc; white-space: nowrap; }
+  .results-table ul { margin: 0; padding-left: 18px; }
+  .status-open { color: #16743a; font-weight: 700; }
+  .status-planned { color: #a66000; font-weight: 700; }
+  .status-closed { color: #9b3027; font-weight: 700; }
+  .pet-yes { color: #16743a; font-weight: 700; }
+  .pet-conditional { color: #a66000; font-weight: 700; }
+  .pet-no { color: #9b3027; font-weight: 700; }
+  .crowd-meter { display: flex; width: 150px; height: 10px; overflow: hidden; border-radius: 5px; background: #e7edf5; }
+  .meter-empty { background: #4cae6b; }
+  .meter-crowded { background: #e3a52e; }
+  .meter-full { background: #d45045; }
+  .crowd-post { display: inline-flex; gap: 4px; margin-top: 7px; }
+  .crowd-post button { padding: 4px 7px; border: 1px solid #bcc9d9; border-radius: 4px; background: #fff; cursor: pointer; }
+  .legend { margin: 14px 0; padding: 12px; border: 1px solid #dfe7f2; background: #fff; }
+  .results-footer { margin-top: 20px; }
+</style>
+<h2>避難所検索結果表示画面</h2>
+<div id="resultsMap" class="results-map" aria-label="検索結果の避難所地図"></div>
 
 {% if results %}
-  <ul>
+<div class="table-wrap">
+  <table class="results-table" id="resultsTable">
+    <thead><tr><th>名称</th><th>住所</th><th>対応災害</th><th>エリア情報</th><th>設備情報</th><th>開設状況</th><th>バリアフリー</th><th>ペット同伴</th><th>混雑状況</th><th>連絡先</th><th>投稿操作</th></tr></thead>
+    <tbody>
     {% for shelter in results %}
-    <li>{{ shelter.name }}</li>
+      <tr data-lat="{{ shelter.latitude if shelter.latitude is not none else '' }}" data-lng="{{ shelter.longitude if shelter.longitude is not none else '' }}">
+        <td>{{ shelter.name or '未登録' }}</td>
+        <td>{{ shelter.address or '未登録' }}</td>
+        <td>{% if shelter.disasters %}<ul>{% for item in shelter.disasters %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}未登録{% endif %}</td>
+        <td>{{ shelter.area or '未登録' }}</td>
+        <td>{{ shelter.facilities or '未登録' }}</td>
+        <td class="{% if shelter.opening_status == '開設中' %}status-open{% elif shelter.opening_status == '開設予定' %}status-planned{% elif shelter.opening_status == '閉鎖中' %}status-closed{% endif %}">{{ shelter.opening_status or '未登録' }}</td>
+        <td>{% if shelter.accessibility %}{% for item in shelter.accessibility %}<span title="{{ item }}" aria-label="{{ item }}">{% if item == '車いす対応' %}♿{% elif item == 'スロープ' %}▰{% elif item == '点字案内' %}⠿{% elif item == '音声案内' %}🔊{% else %}♿{% endif %}</span> {% endfor %}{% else %}未登録{% endif %}</td>
+        <td class="{% if shelter.pet_policy == '可' %}pet-yes{% elif shelter.pet_policy == '条件付き' %}pet-conditional{% elif shelter.pet_policy == '不可' %}pet-no{% endif %}">{{ shelter.pet_policy or '未登録' }}</td>
+        <td><strong>{{ shelter.crowd.status }}</strong><br><small>{% if shelter.crowd.latest %}最終更新：{{ shelter.crowd.latest }}{% else %}直近3時間の投稿なし{% endif %}</small><br>空 {{ shelter.crowd.counts['空'] }} / 混 {{ shelter.crowd.counts['混'] }} / 満 {{ shelter.crowd.counts['満'] }}<div class="crowd-meter" title="投稿割合"><span class="meter-empty" style="width: {{ (shelter.crowd.counts['空'] / shelter.crowd.total * 100) if shelter.crowd.total else 0 }}%"></span><span class="meter-crowded" style="width: {{ (shelter.crowd.counts['混'] / shelter.crowd.total * 100) if shelter.crowd.total else 0 }}%"></span><span class="meter-full" style="width: {{ (shelter.crowd.counts['満'] / shelter.crowd.total * 100) if shelter.crowd.total else 0 }}%"></span></div></td>
+        <td>{{ shelter.contact or '未登録' }}</td>
+        <td><form class="crowd-post" method="post" action="/crowd_reports"><input type="hidden" name="shelter_id" value="{{ shelter.id }}"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="area" value="{{ area }}"><input type="hidden" name="district" value="{{ district }}">{% for filter_name in filters %}<input type="hidden" name="{{ filter_name }}" value="on">{% endfor %}<button name="status" value="空">空</button><button name="status" value="混">混</button><button name="status" value="満">満</button></form></td>
+      </tr>
     {% endfor %}
-  </ul>
-{% else %}
-  <p>該当する避難所が見つかりませんでした</p>
-{% endif %}
+    </tbody>
+  </table>
+</div>
+{% else %}<p>該当する避難所が見つかりませんでした。</p>{% endif %}
 
-<p>
-  <a href="/shelter_search">検索画面に戻る</a> |
-  <a href="/">トップページへ戻る</a>
-</p>
+<div class="legend"><strong>バリアフリー凡例：</strong> ♿ 車いす対応　▰ スロープ　⠿ 点字案内　🔊 音声案内　♿ 多目的トイレ</div>
+<p class="results-footer"><a href="{{ url_for('shelter_search', name=name, area=area, district=district) }}">検索画面へ戻る</a>{% if session.logged_in %} | <a href="{{ url_for('shelter_register') }}">避難所を登録する</a>{% endif %} | <a href="{{ url_for('index') }}">ホームへ戻る</a></p>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const results = {{ results|tojson }};
+  const fallback = [40.8244, 140.7400];
+  const map = L.map('resultsMap').setView(fallback, 12);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' }).addTo(map);
+  const rows = Array.from(document.querySelectorAll('#resultsTable tbody tr'));
+  const coordinateResults = results.filter(item => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude)));
+  coordinateResults.forEach(function(item) {
+    L.marker([item.latitude, item.longitude]).addTo(map).bindPopup('<strong>' + escapeHtml(item.name || '未登録') + '</strong><br>' + escapeHtml(item.address || '住所未登録'));
+  });
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, function(character) { return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[character]; });
+  }
+  function showPosition(position) {
+    const current = [position.coords.latitude, position.coords.longitude];
+    L.marker(current).addTo(map).bindPopup('現在地').openPopup();
+    map.setView(current, 13);
+    coordinateResults.forEach(item => item.distance = distance(current[0], current[1], Number(item.latitude), Number(item.longitude)));
+    coordinateResults.sort((a, b) => a.distance - b.distance);
+    const ordered = coordinateResults.concat(results.filter(item => !coordinateResults.includes(item)));
+    ordered.forEach(item => { const row = rows.find(candidate => candidate.dataset.lat == item.latitude && candidate.dataset.lng == item.longitude && candidate.dataset.name !== 'used'); if (row) { row.dataset.name = 'used'; row.parentElement.appendChild(row); } });
+  }
+  function distance(lat1, lng1, lat2, lng2) {
+    const radius = 6371; const radians = value => value * Math.PI / 180;
+    const dLat = radians(lat2 - lat1); const dLng = radians(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLng / 2) ** 2;
+    return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+  if (navigator.geolocation) navigator.geolocation.getCurrentPosition(showPosition, () => {}, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+});
+</script>
 {% endblock %}

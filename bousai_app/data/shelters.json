@@ -12,15 +12,45 @@
     "name": "鵠洋小学校"
   },
   {
-    "id": 6,
+    "id": 8,
     "name": "ああ"
   },
   {
-    "id": 7,
+    "id": 9,
     "name": "a"
   },
   {
-    "id": 8,
-    "name": "ああ"
+    "id": 10,
+    "accessibility": [
+      "車いす対応",
+      "スロープ",
+      "点字案内",
+      "音声案内"
+    ],
+    "accessibility_other": "",
+    "address": "青森県青森市中央1-22-5",
+    "capacity": 100,
+    "disaster_other": "",
+    "disasters": [
+      "地震",
+      "津波",
+      "洪水",
+      "土砂災害"
+    ],
+    "email": "kocho-gazou@city.aomori.aomori.jp",
+    "facilities": [
+      "飲料水",
+      "毛布",
+      "トイレ",
+      "駐車場"
+    ],
+    "facility_other": "",
+    "image": "",
+    "latest_updated_at": "2026-09-17T14:04",
+    "name": "青森市役所",
+    "pet_policy": "可",
+    "phone": "017-734-6865",
+    "postal_code": "0300822",
+    "status": "開設中"
   }
 ]
